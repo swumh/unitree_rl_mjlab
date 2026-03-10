@@ -131,8 +131,37 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     dump_yaml(log_dir / "params" / "env.yaml", env_cfg)
     dump_yaml(log_dir / "params" / "agent.yaml", agent_cfg)
 
+  num_learning_iterations = cfg.agent.max_iterations
+  if resume_path is not None:
+    if rank == 0:
+      print(f"[INFO] Resuming from checkpoint: {resume_path}")
+    runner.load(str(resume_path), map_location=device)
+
+    # Checkpoints store the last completed iteration, so continue from the next one.
+    resumed_iteration = runner.current_learning_iteration
+    runner.current_learning_iteration = resumed_iteration + 1
+    num_learning_iterations = (
+      cfg.agent.max_iterations - runner.current_learning_iteration
+    )
+
+    if rank == 0:
+      print(
+        "[INFO] Restored training state from iteration "
+        f"{resumed_iteration}; continuing at iteration "
+        f"{runner.current_learning_iteration}."
+      )
+
+    if num_learning_iterations <= 0:
+      if rank == 0:
+        print(
+          "[WARN] Checkpoint has already reached the configured "
+          f"max_iterations={cfg.agent.max_iterations}. Nothing to train."
+        )
+      env.close()
+      return
+
   runner.learn(
-    num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
+    num_learning_iterations=num_learning_iterations, init_at_random_ep_len=True
   )
 
   env.close()
